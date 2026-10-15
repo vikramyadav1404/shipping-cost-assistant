@@ -2,6 +2,54 @@
 
 Finds routes whose cost per tonne-km is rising in a way that looks out of the ordinary, then checks the context notes before raising a flag. A rise is excused only when a note genuinely explains it; every verdict says which note it used or why the nearby notes did not count.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    SR[("shipment_records.csv<br/>2,940 shipments")]
+    CN[("context_notes.csv<br/>10 notes")]
+    SF[("sample_output_format.csv<br/>column contract")]
+
+    subgraph core["core.py: numbers only, no AI"]
+        C1["Group shipments by route<br/>and Monday-to-Sunday week"]
+        C2["Cost per tonne-km<br/>= total cost / (tonnes x km)"]
+        C3["Compare with the route's own<br/>last 8 weeks and with similar<br/>routes in the same week"]
+        C4{"Rising AND at least 20%<br/>above own history<br/>OR similar routes?"}
+        C1 --> C2 --> C3 --> C4
+    end
+
+    subgraph notesbox["notes.py: reading the notes"]
+        N1["Turn each note into facts:<br/>which route, did costs go up,<br/>date window, stated %"]
+        N2["Find relevant notes<br/>TF-IDF + same route + close in time"]
+        N3{"Does a note pass<br/>all 4 strict checks?"}
+        N1 --> N2 --> N3
+    end
+
+    LLM["llm.py (optional)<br/>Groq or any OpenAI-compatible API<br/>temperature 0, answers cached"]
+
+    SR --> C1
+    CN --> N1
+    LLM -. "second opinion,<br/>checked against the note text" .-> N1
+    C4 -- "no" --> NORMAL["Normal week<br/>output/weekly_metrics.csv"]
+    C4 -- "yes: 19 route-weeks" --> N2
+    N3 -- "yes" --> JUST["No (justified)<br/>+ matched_note_id"]
+    N3 -- "no" --> FLAG["Yes: flagged<br/>for human review"]
+    JUST --> OUT[["output/output.csv"]]
+    FLAG --> OUT
+    SF -. "column names and order" .-> OUT
+```
+
+No database, no server and no network needed: one command reads the CSV files and writes CSV/JSON files. Every number, comparison and flag is plain pandas; the LLM is optional, only helps read the notes, and is never trusted without checking its answer against the note text.
+
+| File | Role |
+|---|---|
+| `assistant.py` | Command-line entry point (`run`, `repro`, `ask`). Wires the steps together, writes the output files and checks the result against the sample rows. |
+| `core.py` | Loads the shipments, computes weekly cost per tonne-km, both comparisons and the anomaly test. |
+| `notes.py` | Turns each note into checkable facts, finds the relevant notes and decides every verdict with strict rules. |
+| `llm.py` | Optional LLM client: any OpenAI-compatible API (Groq by default), temperature 0, answers cached on disk, token log. |
+| `qa.py` | The `ask` command: code picks the evidence (weekly numbers, verdicts, notes), then the answer is built only from it. |
+| `eval.py` | Hand-labelled test set plus guardrail tests that rerun the assistant on deliberately altered notes. |
+
 ## Run it
 
 ```bash
@@ -11,17 +59,14 @@ python assistant.py run          # -> output/output.csv (+ output/weekly_metrics
 python assistant.py repro        # 3 separate runs, compared byte for byte -> repro/repro_check.md
 python assistant.py ask "why did Chennai-Bangalore get pricier in March 2025?"
 python eval.py                   # labelled set + guardrail tests -> eval_report.md
+python demo.py                   # guided walkthrough of every step (press Enter between steps)
 ```
 
 Works fully offline. To switch on the LLM layer, set `LLM_API_KEY` (Groq free tier, open-source `llama-3.1-8b-instant` by default; any OpenAI-compatible endpoint via `LLM_BASE_URL` / `LLM_MODEL`).
 
 ## How it works
 
-```
-shipments --> weekly cost/t-km --> two baselines --> anomaly test --+
-                                                                      +--> verdict + plain-English reason
-notes --> facts (rules, + verified LLM opinion) --> TF-IDF retrieval -+
-```
+Each step below is one part of the [Architecture](#architecture) diagram.
 
 **1. Core numbers (`core.py`, no AI).**
 - Route = `origin-destination`. Week = Monday to Sunday, labelled by its Monday.
@@ -40,6 +85,23 @@ notes --> facts (rules, + verified LLM opinion) --> TF-IDF retrieval -+
 2. it says costs went up;
 3. its window overlaps the flagged week;
 4. it is big enough: a stated % range must cover both the rise vs the route's own history and its gap vs similar routes (+3 pts slack), and an all-routes note cannot explain one route jumping above its peers, because the peers had the same note.
+
+How one flagged route-week is decided (the notes are tried in order of relevance; the first note that passes every check is cited):
+
+```mermaid
+flowchart TD
+    START["Flagged route-week"] --> NEXT{"Another relevant<br/>note to try?"}
+    NEXT -- "no" --> FLAG["flagged = Yes<br/>reason says which notes were<br/>checked and why they failed"]
+    NEXT -- "yes" --> Q1{"1. For this route or All Routes,<br/>and a route in the dataset?"}
+    Q1 -- "no" --> NEXT
+    Q1 -- "yes" --> Q2{"2. Says costs<br/>went up?"}
+    Q2 -- "no" --> NEXT
+    Q2 -- "yes" --> Q3{"3. Its date window<br/>overlaps this week?"}
+    Q3 -- "no" --> NEXT
+    Q3 -- "yes" --> Q4{"4. Big enough to explain<br/>the rise and the gap<br/>vs similar routes?"}
+    Q4 -- "no" --> NEXT
+    Q4 -- "yes" --> JUST["flagged = No (justified)<br/>matched_note_id = that note<br/>reason quotes it word for word"]
+```
 
 The reason column quotes the note verbatim (never paraphrased by a model), so an explanation cannot contain a fact that is not in the notes.
 
