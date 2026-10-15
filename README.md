@@ -10,6 +10,7 @@ pip install -r requirements.txt
 python assistant.py run          # -> output/output.csv (+ output/weekly_metrics.csv, output/note_facts.json, token_log.md)
 python assistant.py repro        # 3 separate runs, compared byte for byte -> repro/repro_check.md
 python assistant.py ask "why did Chennai-Bangalore get pricier in March 2025?"
+python eval.py                   # labelled set + guardrail tests -> eval_report.md
 ```
 
 Works fully offline. To switch on the LLM layer, set `LLM_API_KEY` (Groq free tier, open-source `llama-3.1-8b-instant` by default; any OpenAI-compatible endpoint via `LLM_BASE_URL` / `LLM_MODEL`).
@@ -25,7 +26,7 @@ notes --> facts (rules, + verified LLM opinion) --> TF-IDF retrieval -+
 **1. Core numbers (`core.py`, no AI).**
 - Route = `origin-destination`. Week = Monday to Sunday, labelled by its Monday.
 - Weekly cost per tonne-km = total freight cost of the week's shipments / total (tonnes x km).
-- `vs_own_history`: this week vs the simple average of the route's weekly values in the 8 calendar weeks strictly before it. Fewer than 8 prior weeks: use what exists (the cell shows how many, e.g. `trailing 3-wk avg`). No prior week (first week of data): left as `n/a`, never padded.
+- `vs_own_history`: this week vs the simple average of the route's weekly values in the 8 calendar weeks strictly before it. Fewer than 8 prior weeks: use what exists (the number of weeks used is in `output/weekly_metrics.csv`, column `own_weeks_used`). No prior week (first week of data): left as `n/a`, never padded.
 - `vs_similar_routes`: this week vs the simple average of the other routes with the same `route_type` in the same week; the route itself is excluded.
 
 **2. Anomaly test.** A route-week is checked when it is **rising** (above its own trailing average) **and** out of the ordinary: at least **+20%** vs its own history **or** at least **+20%** vs similar routes. Why 20%: in weeks with no known event, the rise vs own history stays below +7% and the gap vs peers below +11% (99th percentiles); real events in this data sit at +21% to +39%. Results are stable between 15% and 25% for every route except the slowly drifting Mumbai-Pune, where the threshold only moves which weeks of an obvious drift get listed.
@@ -59,6 +60,7 @@ The numbers, comparisons and flags never depend on an LLM.
 - **Hand check.** Delhi-Jaipur, week of 11 Nov 2024: shipments SHP01093-SHP01096 cost 84,388 INR for 20,222.6 tonne-km = 4.173.
 - **Data checks.** 7 routes x 104 weeks, no missing weeks, at least 3 shipments per route-week, consistent route types.
 - **Every trap note behaves.** N004 (routes not in the dataset), N005 (costs not significantly affected), N006 and N008 (stable / no disruptions), N007 (roads improved), N009 (back to normal), N010 (absorbed without a rate change) never justify anything. N001 justifies only the weeks inside Feb 24-Mar 8; N003's 5-7% cannot cover a 20%+ jump or a gap vs peers.
+- **Labelled eval (`python eval.py`, report in `eval_report.md`): 18/18.** 9 route-weeks labelled by hand from the notes, the 3 sample rows, a citation-integrity check on every output row, and 5 guardrail tests that rerun the assistant on deliberately altered notes (note moved to another route, moved to the wrong week, rewritten to say costs were not affected, a 2% rise set against a 35% jump, and a genuine new note that must be accepted). A deliberately broken version that accepts any note scores 9/18, so the eval does catch mistakes.
 - **Reproducibility.** `repro/repro_check.md`: three runs in separate processes are byte-for-byte identical.
 - **LLM path tested** against a local mock API: same output as offline mode, second run served from cache (0 calls), fabricated note ids in `ask` answers are caught.
 
@@ -81,5 +83,5 @@ See `token_log.md`. Offline mode: 0 LLM calls, $0. LLM mode: one call per contex
 ## Assumptions
 
 - The output lists every route-week that tripped the test (`Yes` or `No (justified)`); normal weeks are in `weekly_metrics.csv`.
-- Only the leading number of `vs_own_history` / `vs_similar_routes` was readable in the sample; the trailing text is produced by `fmt_own` / `fmt_peer` in `assistant.py` (one place to change). Column names are taken from `sample_output_format.csv` automatically.
+- The wording after the % in `vs_own_history` / `vs_similar_routes` is copied from `sample_output_format.csv`; column names are taken from that file automatically.
 - A note's explicit dates take the note's year. Thresholds and slack are in `CONFIG` in `assistant.py`.

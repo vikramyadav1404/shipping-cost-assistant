@@ -41,13 +41,13 @@ OUTPUT_COLUMNS = ["route", "week_of", "cost_per_tonne_km", "vs_own_history", "vs
 def fmt_own(r) -> str:
     if pd.isna(r.vs_own_pct):
         return "n/a (no prior weeks)"
-    return f"{r.vs_own_pct:+.1f}% vs trailing {r.own_weeks_used}-wk avg ({r.own_avg:.2f})"
+    return f"{r.vs_own_pct:+.1f}% vs this route's past average"
 
 
 def fmt_peer(r) -> str:
     if pd.isna(r.vs_similar_pct):
         return f"n/a (no other {r.route_type} routes that week)"
-    return f"{r.vs_similar_pct:+.1f}% vs other {r.route_type} routes avg ({r.peer_avg:.2f})"
+    return f"{r.vs_similar_pct:+.1f}% vs similar-length routes this week"
 
 
 def run_pipeline(data_dir: Path, use_llm: bool, use_cache: bool):
