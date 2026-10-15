@@ -5,38 +5,68 @@ Finds routes whose cost per tonne-km is rising in a way that looks out of the or
 ## Architecture
 
 ```mermaid
-flowchart LR
-    SR[("shipment_records.csv<br/>2,940 shipments")]
-    CN[("context_notes.csv<br/>10 notes")]
-    SF[("sample_output_format.csv<br/>column contract")]
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Segoe UI, Helvetica, Arial, sans-serif", "fontSize": "15px", "lineColor": "#94A3B8", "edgeLabelBackground": "#F1F5F9", "textColor": "#0F172A"}}}%%
+flowchart TB
+    SR[("📦 shipment_records.csv<br/>2,940 shipments")]
+    CN[("📝 context_notes.csv<br/>10 notes")]
+    SF[("📋 sample_output_format.csv<br/>column contract")]
 
-    subgraph core["core.py: numbers only, no AI"]
-        C1["Group shipments by route<br/>and Monday-to-Sunday week"]
-        C2["Cost per tonne-km<br/>= total cost / (tonnes x km)"]
-        C3["Compare with the route's own<br/>last 8 weeks and with similar<br/>routes in the same week"]
-        C4{"Rising AND at least 20%<br/>above own history<br/>OR similar routes?"}
+    subgraph core["⚙️ core.py · numbers only, no AI"]
+        C1("Group shipments by route<br/>and Monday-to-Sunday week")
+        C2("Cost per tonne-km<br/>= total cost / (tonnes × km)")
+        C3("Compare with the route's own<br/>last 8 weeks and with similar<br/>routes in the same week")
+        C4{{"Rising AND ≥ 20%<br/>above own history<br/>OR similar routes?"}}
         C1 --> C2 --> C3 --> C4
     end
 
-    subgraph notesbox["notes.py: reading the notes"]
-        N1["Turn each note into facts:<br/>which route, did costs go up,<br/>date window, stated %"]
-        N2["Find relevant notes<br/>TF-IDF + same route + close in time"]
-        N3{"Does a note pass<br/>all 4 strict checks?"}
+    subgraph notesbox["🔎 notes.py · reading the notes"]
+        N1("Turn each note into facts:<br/>which route, did costs go up,<br/>date window, stated %")
+        N2("Find relevant notes<br/>TF-IDF + same route + close in time")
+        N3{{"Does a note pass<br/>all 4 strict checks?"}}
         N1 --> N2 --> N3
     end
 
-    LLM["llm.py (optional)<br/>Groq or any OpenAI-compatible API<br/>temperature 0, answers cached"]
+    LLM("🤖 llm.py (optional)<br/>Groq or any OpenAI-compatible API<br/>temperature 0, answers cached")
 
     SR --> C1
     CN --> N1
     LLM -. "second opinion,<br/>checked against the note text" .-> N1
-    C4 -- "no" --> NORMAL["Normal week<br/>output/weekly_metrics.csv"]
+    C4 -- "no" --> NORMAL(["Normal week<br/>output/weekly_metrics.csv"])
     C4 -- "yes: 19 route-weeks" --> N2
-    N3 -- "yes" --> JUST["No (justified)<br/>+ matched_note_id"]
-    N3 -- "no" --> FLAG["Yes: flagged<br/>for human review"]
-    JUST --> OUT[["output/output.csv"]]
+    N3 -- "yes" --> JUST(["✅ No (justified)<br/>+ matched_note_id"])
+    N3 -- "no" --> FLAG(["🚩 Yes: flagged<br/>for human review"])
+    JUST --> OUT[["📄 output/output.csv"]]
     FLAG --> OUT
     SF -. "column names and order" .-> OUT
+
+    classDef data fill:#DBEAFE,stroke:#2563EB,stroke-width:2px,color:#1E3A8A
+    classDef step fill:#EDE9FE,stroke:#7C3AED,stroke-width:2px,color:#3B0764
+    classDef note fill:#CCFBF1,stroke:#0D9488,stroke-width:2px,color:#134E4A
+    classDef ai fill:#FFEDD5,stroke:#EA580C,stroke-width:2px,stroke-dasharray:6 4,color:#7C2D12
+    classDef decide fill:#FEF3C7,stroke:#D97706,stroke-width:2px,color:#78350F
+    classDef ok fill:#DCFCE7,stroke:#16A34A,stroke-width:2px,color:#14532D
+    classDef bad fill:#FEE2E2,stroke:#DC2626,stroke-width:2px,color:#7F1D1D
+    classDef quiet fill:#F1F5F9,stroke:#64748B,stroke-width:1.5px,color:#334155
+    classDef out fill:#1E3A8A,stroke:#1E3A8A,stroke-width:2px,color:#FFFFFF
+
+    class SR,CN,SF data
+    class C1,C2,C3 step
+    class N1,N2 note
+    class LLM ai
+    class C4,N3 decide
+    class JUST ok
+    class FLAG bad
+    class NORMAL quiet
+    class OUT out
+
+    style core fill:#7C3AED14,stroke:#7C3AED,stroke-width:2px,stroke-dasharray:5 5,color:#8B5CF6
+    style notesbox fill:#0D948814,stroke:#0D9488,stroke-width:2px,stroke-dasharray:5 5,color:#14B8A6
+
+    linkStyle default stroke:#94A3B8,stroke-width:2px
+    linkStyle 9 stroke:#D97706,stroke-width:2.5px
+    linkStyle 10,12 stroke:#16A34A,stroke-width:2.5px
+    linkStyle 11,13 stroke:#DC2626,stroke-width:2.5px
+    linkStyle 7,14 stroke:#EA580C,stroke-width:1.5px
 ```
 
 No database, no server and no network needed: one command reads the CSV files and writes CSV/JSON files. Every number, comparison and flag is plain pandas; the LLM is optional, only helps read the notes, and is never trusted without checking its answer against the note text.
@@ -89,18 +119,41 @@ Each step below is one part of the [Architecture](#architecture) diagram.
 How one flagged route-week is decided (the notes are tried in order of relevance; the first note that passes every check is cited):
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Segoe UI, Helvetica, Arial, sans-serif", "fontSize": "15px", "lineColor": "#94A3B8", "edgeLabelBackground": "#F1F5F9", "textColor": "#0F172A"}}}%%
 flowchart TD
-    START["Flagged route-week"] --> NEXT{"Another relevant<br/>note to try?"}
-    NEXT -- "no" --> FLAG["flagged = Yes<br/>reason says which notes were<br/>checked and why they failed"]
-    NEXT -- "yes" --> Q1{"1. For this route or All Routes,<br/>and a route in the dataset?"}
-    Q1 -- "no" --> NEXT
-    Q1 -- "yes" --> Q2{"2. Says costs<br/>went up?"}
-    Q2 -- "no" --> NEXT
-    Q2 -- "yes" --> Q3{"3. Its date window<br/>overlaps this week?"}
-    Q3 -- "no" --> NEXT
-    Q3 -- "yes" --> Q4{"4. Big enough to explain<br/>the rise and the gap<br/>vs similar routes?"}
-    Q4 -- "no" --> NEXT
-    Q4 -- "yes" --> JUST["flagged = No (justified)<br/>matched_note_id = that note<br/>reason quotes it word for word"]
+    START(["Unusual route-week"]) --> NEXT{{"Another relevant<br/>note to try?"}}
+    NEXT -- "no" --> FLAG(["🚩 flagged = Yes<br/>reason says which notes were<br/>checked and why they failed"])
+    NEXT -- "yes" --> Q1{{"1 · Right route?<br/>this route or All Routes,<br/>and a route in the dataset"}}
+    Q1 -- "yes" --> Q2{{"2 · Says costs<br/>went up?"}}
+    Q2 -- "yes" --> Q3{{"3 · Date window<br/>overlaps this week?"}}
+    Q3 -- "yes" --> Q4{{"4 · Big enough for the rise<br/>and the gap vs<br/>similar routes?"}}
+    Q4 -- "yes" --> JUST(["✅ flagged = No (justified)<br/>matched_note_id = that note<br/>reason quotes it word for word"])
+    Q1 -- "no" --> SKIP("❌ Note rejected<br/>try the next one")
+    Q2 -- "no" --> SKIP
+    Q3 -- "no" --> SKIP
+    Q4 -- "no" --> SKIP
+    SKIP -.-> NEXT
+
+    classDef data fill:#DBEAFE,stroke:#2563EB,stroke-width:2px,color:#1E3A8A
+    classDef step fill:#EDE9FE,stroke:#7C3AED,stroke-width:2px,color:#3B0764
+    classDef note fill:#CCFBF1,stroke:#0D9488,stroke-width:2px,color:#134E4A
+    classDef ai fill:#FFEDD5,stroke:#EA580C,stroke-width:2px,stroke-dasharray:6 4,color:#7C2D12
+    classDef decide fill:#FEF3C7,stroke:#D97706,stroke-width:2px,color:#78350F
+    classDef ok fill:#DCFCE7,stroke:#16A34A,stroke-width:2px,color:#14532D
+    classDef bad fill:#FEE2E2,stroke:#DC2626,stroke-width:2px,color:#7F1D1D
+    classDef quiet fill:#F1F5F9,stroke:#64748B,stroke-width:1.5px,color:#334155
+    classDef out fill:#1E3A8A,stroke:#1E3A8A,stroke-width:2px,color:#FFFFFF
+
+    class START data
+    class NEXT,Q1,Q2,Q3,Q4 decide
+    class JUST ok
+    class FLAG bad
+    class SKIP quiet
+
+    linkStyle default stroke:#94A3B8,stroke-width:2px
+    linkStyle 2,3,4,5,6 stroke:#16A34A,stroke-width:2.5px
+    linkStyle 1,7,8,9,10 stroke:#DC2626,stroke-width:2px
+    linkStyle 11 stroke:#64748B,stroke-width:1.5px
 ```
 
 The reason column quotes the note verbatim (never paraphrased by a model), so an explanation cannot contain a fact that is not in the notes.
